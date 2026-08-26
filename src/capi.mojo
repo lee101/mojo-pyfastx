@@ -1,13 +1,10 @@
 """Byte kernels used by the Python FASTA/FASTQ indexer."""
 
-from std.algorithm import parallelize
 from std.sys.info import simd_width_of as simdwidthof
 
-comptime BytePtr = UnsafePointer[UInt8, AnyOrigin[mut=True]]
-comptime IntPtr = UnsafePointer[Int64, AnyOrigin[mut=True]]
+comptime BytePtr = Pointer[UInt8, AnyOrigin[mut=True]]
+comptime IntPtr = Pointer[Int64, AnyOrigin[mut=True]]
 comptime BYTE_W = simdwidthof[DType.uint8]()
-comptime TRANSFORM_PARALLEL_THRESHOLD = 32_000_000
-comptime TRANSFORM_TASKS = 8
 
 
 def canonical_simd[W: Int](chars: SIMD[DType.uint8, W]) -> Bool:
@@ -67,32 +64,39 @@ def transform_range(src: BytePtr, dst: BytePtr, mapping: BytePtr, n: Int, mode: 
     var i = start
     if mode == 0:
         while i + BYTE_W <= end:
-            var chars = src.load[width=BYTE_W, alignment=1](i)
+            var chars = src.unsafe_load[width=BYTE_W, alignment=1](i)
             if canonical_simd[BYTE_W](chars):
-                dst.store(i, canonical_complement_simd[BYTE_W](chars))
+                dst.unsafe_store(i, canonical_complement_simd[BYTE_W](chars))
             else:
-                dst.store(i, complement_simd[BYTE_W](chars))
+                dst.unsafe_store(i, complement_simd[BYTE_W](chars))
             i += BYTE_W
         while i < end:
-            dst[i] = mapping[Int(src[i])]
+            dst[unsafe_offset=i] = mapping[
+                unsafe_offset=Int(src[unsafe_offset=i])
+            ]
             i += 1
     elif mode == 1:
         while i + BYTE_W <= end:
-            dst.store(i, src.load[width=BYTE_W, alignment=1](n - i - BYTE_W).reversed())
+            dst.unsafe_store(
+                i,
+                src.unsafe_load[width=BYTE_W, alignment=1](n - i - BYTE_W).reversed(),
+            )
             i += BYTE_W
         while i < end:
-            dst[i] = src[n - 1 - i]
+            dst[unsafe_offset=i] = src[unsafe_offset=n - 1 - i]
             i += 1
     else:
         while i + BYTE_W <= end:
-            var chars = src.load[width=BYTE_W, alignment=1](n - i - BYTE_W).reversed()
+            var chars = src.unsafe_load[width=BYTE_W, alignment=1](n - i - BYTE_W).reversed()
             if canonical_simd[BYTE_W](chars):
-                dst.store(i, canonical_complement_simd[BYTE_W](chars))
+                dst.unsafe_store(i, canonical_complement_simd[BYTE_W](chars))
             else:
-                dst.store(i, complement_simd[BYTE_W](chars))
+                dst.unsafe_store(i, complement_simd[BYTE_W](chars))
             i += BYTE_W
         while i < end:
-            dst[i] = mapping[Int(src[n - 1 - i])]
+            dst[unsafe_offset=i] = mapping[
+                unsafe_offset=Int(src[unsafe_offset=n - 1 - i])
+            ]
             i += 1
 
 
@@ -107,17 +111,7 @@ def mpf_transform(src_addr: Int, dst_addr: Int, map_addr: Int, n: Int, mode: Int
     var src = BytePtr(unsafe_from_address=src_addr)
     var dst = BytePtr(unsafe_from_address=dst_addr)
     var mapping = BytePtr(unsafe_from_address=map_addr)
-    if n < TRANSFORM_PARALLEL_THRESHOLD:
-        transform_range(src, dst, mapping, n, mode, 0, n)
-        return
-
-    @parameter
-    def work(task: Int):
-        var start = n * task // TRANSFORM_TASKS
-        var end = n * (task + 1) // TRANSFORM_TASKS
-        transform_range(src, dst, mapping, n, mode, start, end)
-
-    parallelize[work](TRANSFORM_TASKS, TRANSFORM_TASKS)
+    transform_range(src, dst, mapping, n, mode, 0, n)
 
 
 @export("mpf_count_bytes")
@@ -128,4 +122,4 @@ def mpf_count_bytes(src_addr: Int, counts_addr: Int, n: Int) abi("C"):
     var src = BytePtr(unsafe_from_address=src_addr)
     var counts = IntPtr(unsafe_from_address=counts_addr)
     for i in range(n):
-        counts[Int(src[i])] += 1
+        counts[unsafe_offset=Int(src[unsafe_offset=i])] += 1
