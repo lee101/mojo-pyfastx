@@ -55,18 +55,21 @@ pixi run build && pixi run test && pixi run bench
 
 ## Benchmarks
 
-Measured with `pixi run bench` on Linux x86_64, Python 3.13.14. Numbers are best of five runs on generated 5 million-base
-FASTA input; the initial-index case deletes upstream's `.fxi` before every measured run.
+Measured with `pixi run bench` on Linux x86_64, Python 3.13.14. Numbers are best of
+five runs on generated sequence data. The FASTA input has 5 million bases; the
+initial-index case deletes upstream's `.fxi` before every measured run.
 
 | case | mojo-pyfastx | pyfastx 2.3.1 | ratio | result |
 | --- | ---: | ---: | ---: | --- |
-| reverse_complement (5M bases) | 2.3 ms | 2.7 ms | 1.18x | faster |
-| Fasta initial index + composition (5M bases) | 14.4 ms | 18.2 ms | 1.26x | faster |
+| reverse_complement (5M bases) | 1.0 ms | 2.8 ms | 2.69x | faster |
+| reverse_complement (32M bases) | 9.7 ms | 24.5 ms | 2.52x | faster |
+| Fasta initial index + composition (5M bases) | 11.4 ms | 38.1 ms | 3.36x | faster |
 
-The transform kernel uses byte SIMD with a scalar tail and parallel work on large inputs. The
-compact FASTA parser avoids per-line objects and unnecessary single-record concatenation before
-composition. These byte transforms and histograms are memory-bandwidth-oriented, so no GPU path
-is provided.
+The transform kernel uses byte SIMD with a scalar tail and 16-way parallel work above
+16 MiB. The histogram has a SIMD fast path for uppercase DNA and a scalar fallback for
+arbitrary bytes. The compact FASTA parser avoids per-line objects and unnecessary
+single-record concatenation before composition. These transforms and histograms do far
+less than roughly two arithmetic operations per byte moved, so no GPU path is provided.
 
 ## How it works
 
@@ -74,11 +77,12 @@ The public classes parse FASTA/FASTQ records and maintain a name-to-record dicti
 an ordered record array for direct name and numeric access. Sequences and qualities are kept
 as Python strings; slices create a lightweight `Sequence` view.
 
-The ctypes boundary passes integer addresses only. Mojo rebuilds those as `UInt8` or
-`Int64` pointers and writes into Python-owned contiguous output buffers. A complement lookup
-table supplies IUPAC complements, and a native byte histogram supplies nucleotide composition
-and quality extrema. No native function
-allocates or owns Python memory.
+The histogram ctypes boundary passes integer addresses only. Mojo rebuilds those as
+`UInt8` or `Int64` pointers and writes into Python-owned contiguous buffers. For ASCII
+transforms, a small CPython API shim allocates the result string once and Mojo fills its
+one-byte storage directly; the portable fallback uses a writable bytearray. A complement
+lookup table supplies IUPAC complements, and the native byte histogram supplies nucleotide
+composition and quality extrema. The Mojo kernels do not allocate or own Python memory.
 
 ## Parity testing
 

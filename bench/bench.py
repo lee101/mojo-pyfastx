@@ -26,11 +26,14 @@ def best(fn, repeat: int = 5) -> float:
 def main() -> None:
     rng = np.random.default_rng(0)
     seq = "".join(rng.choice(np.array(list("ACGTN")), size=5_000_000))
+    parallel_seq = (seq * 7)[:32_000_003]
     with tempfile.TemporaryDirectory() as directory:
         fasta = Path(directory) / "large.fa"
         fasta.write_text(">large generated\n" + "\n".join(seq[i:i + 100] for i in range(0, len(seq), 100)) + "\n")
         mpf.reverse_complement(seq)
         pyfastx.reverse_complement(seq)
+        mpf.reverse_complement(parallel_seq)
+        pyfastx.reverse_complement(parallel_seq)
         mpf.Fasta(fasta)
         pyfastx.Fasta(str(fasta))
 
@@ -46,6 +49,8 @@ def main() -> None:
         cases = [
             ("reverse_complement (5M bases)", lambda: mpf.reverse_complement(seq),
              lambda: pyfastx.reverse_complement(seq)),
+            ("reverse_complement (32M bases)", lambda: mpf.reverse_complement(parallel_seq),
+             lambda: pyfastx.reverse_complement(parallel_seq)),
             ("Fasta initial index + composition (5M bases)", ours_index, theirs_index),
         ]
         print(f"Machine: {platform.processor() or platform.machine()}, Python {platform.python_version()}")

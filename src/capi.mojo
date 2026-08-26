@@ -1,10 +1,13 @@
 """Byte kernels used by the Python FASTA/FASTQ indexer."""
 
+from max.algorithm import parallelize
 from std.sys.info import simd_width_of as simdwidthof
 
 comptime BytePtr = Pointer[UInt8, AnyOrigin[mut=True]]
 comptime IntPtr = Pointer[Int64, AnyOrigin[mut=True]]
 comptime BYTE_W = simdwidthof[DType.uint8]()
+comptime PARALLEL_THRESHOLD = 16 * 1024 * 1024
+comptime TRANSFORM_WORKERS = 16
 
 
 def canonical_simd[W: Int](chars: SIMD[DType.uint8, W]) -> Bool:
@@ -111,7 +114,18 @@ def mpf_transform(src_addr: Int, dst_addr: Int, map_addr: Int, n: Int, mode: Int
     var src = BytePtr(unsafe_from_address=src_addr)
     var dst = BytePtr(unsafe_from_address=dst_addr)
     var mapping = BytePtr(unsafe_from_address=map_addr)
-    transform_range(src, dst, mapping, n, mode, 0, n)
+
+    @__parameter
+    @__copy_capture(src, dst, mapping, n, mode)
+    def work(worker: Int):
+        var start = worker * n // TRANSFORM_WORKERS
+        var end = (worker + 1) * n // TRANSFORM_WORKERS
+        transform_range(src, dst, mapping, n, mode, start, end)
+
+    if n >= PARALLEL_THRESHOLD:
+        parallelize[work](TRANSFORM_WORKERS, TRANSFORM_WORKERS)
+    else:
+        transform_range(src, dst, mapping, n, mode, 0, n)
 
 
 @export("mpf_count_bytes")
@@ -121,5 +135,35 @@ def mpf_count_bytes(src_addr: Int, counts_addr: Int, n: Int) abi("C"):
         return
     var src = BytePtr(unsafe_from_address=src_addr)
     var counts = IntPtr(unsafe_from_address=counts_addr)
-    for i in range(n):
+    var count_a = 0
+    var count_c = 0
+    var count_g = 0
+    var count_n = 0
+    var count_t = 0
+    var i = 0
+    while i + BYTE_W <= n:
+        var chars = src.unsafe_load[width=BYTE_W, alignment=1](i)
+        var is_a = chars.eq(UInt8(65))
+        var is_c = chars.eq(UInt8(67))
+        var is_g = chars.eq(UInt8(71))
+        var is_n = chars.eq(UInt8(78))
+        var is_t = chars.eq(UInt8(84))
+        var valid = is_a | is_c | is_g | is_n | is_t
+        if Int(valid.select(SIMD[DType.uint8, BYTE_W](1), SIMD[DType.uint8, BYTE_W](0)).reduce_add()) == BYTE_W:
+            count_a += Int(is_a.select(SIMD[DType.uint8, BYTE_W](1), SIMD[DType.uint8, BYTE_W](0)).reduce_add())
+            count_c += Int(is_c.select(SIMD[DType.uint8, BYTE_W](1), SIMD[DType.uint8, BYTE_W](0)).reduce_add())
+            count_g += Int(is_g.select(SIMD[DType.uint8, BYTE_W](1), SIMD[DType.uint8, BYTE_W](0)).reduce_add())
+            count_n += Int(is_n.select(SIMD[DType.uint8, BYTE_W](1), SIMD[DType.uint8, BYTE_W](0)).reduce_add())
+            count_t += Int(is_t.select(SIMD[DType.uint8, BYTE_W](1), SIMD[DType.uint8, BYTE_W](0)).reduce_add())
+        else:
+            for lane in range(BYTE_W):
+                counts[unsafe_offset=Int(chars[lane])] += 1
+        i += BYTE_W
+    while i < n:
         counts[unsafe_offset=Int(src[unsafe_offset=i])] += 1
+        i += 1
+    counts[unsafe_offset=65] += Int64(count_a)
+    counts[unsafe_offset=67] += Int64(count_c)
+    counts[unsafe_offset=71] += Int64(count_g)
+    counts[unsafe_offset=78] += Int64(count_n)
+    counts[unsafe_offset=84] += Int64(count_t)

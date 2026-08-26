@@ -16,8 +16,18 @@ def test_reverse_complement_matches_upstream_iupac():
 def test_reverse_complement_simd_tail_and_parallel_paths_match_upstream():
     simd_tail = ("ACGTURYSWKMBDHVNacgturyswkmbdhvnXYZ" * 3) + "A"
     assert mpf.reverse_complement(simd_tail) == reference.reverse_complement(simd_tail)
-    parallel_input = ("ACGTN" * 6_400_001)[:-2]
-    assert mpf.reverse_complement(parallel_input) == reference.reverse_complement(parallel_input)
+    below_threshold = "ACGTN" * 3_355_443
+    above_threshold_tail = ("ACGTN" * 3_355_443) + "AC"
+    assert len(below_threshold) == 16 * 1024 * 1024 - 1
+    assert len(above_threshold_tail) == 16 * 1024 * 1024 + 1
+    assert mpf.reverse_complement(below_threshold) == reference.reverse_complement(below_threshold)
+    assert mpf.reverse_complement(above_threshold_tail) == reference.reverse_complement(above_threshold_tail)
+
+
+def test_histogram_simd_fast_path_scalar_fallback_and_tail():
+    value = ("ACGTN" * 19) + "acgturyswkmbdhvnXYZ"
+    expected = np.bincount(np.frombuffer(value.encode(), dtype=np.uint8), minlength=256)
+    assert np.array_equal(_lib.histogram(value), expected)
 
 
 def test_fasta_indexed_access_and_statistics_match_upstream(files):

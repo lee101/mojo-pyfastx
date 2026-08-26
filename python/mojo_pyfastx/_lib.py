@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import ctypes
+import importlib
 import os
 import subprocess
+import sysconfig
 
 import numpy as np
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 LIB = os.environ.get("MOJO_PYFASTX_LIB") or os.path.join(ROOT, "dist", "libmojo-pyfastx.so")
+NATIVE = os.path.join(os.path.dirname(__file__), "_native" + sysconfig.get_config_var("EXT_SUFFIX"))
 I = ctypes.c_int64
 
 _complement = bytearray(range(256))
@@ -21,8 +24,9 @@ _IDENTITY = np.arange(256, dtype=np.uint8)
 
 
 def build() -> str:
-    sources = [os.path.join(ROOT, "src", "capi.mojo")]
-    if os.path.exists(LIB) and os.path.getmtime(LIB) >= max(map(os.path.getmtime, sources)):
+    sources = [os.path.join(ROOT, "src", name) for name in ("capi.mojo", "python_shim.c")]
+    outputs = (LIB, NATIVE)
+    if all(os.path.exists(path) for path in outputs) and min(map(os.path.getmtime, outputs)) >= max(map(os.path.getmtime, sources)):
         return LIB
     proc = subprocess.run(["bash", os.path.join(ROOT, "build", "build.sh")], cwd=ROOT,
                           text=True, capture_output=True, timeout=1800)
@@ -32,6 +36,20 @@ def build() -> str:
 
 
 _handle: ctypes.CDLL | None = None
+_native = None
+_native_checked = False
+
+
+def _native_module():
+    global _native, _native_checked
+    if not _native_checked:
+        build()
+        try:
+            _native = importlib.import_module("._native", __package__)
+        except ImportError:
+            _native = None
+        _native_checked = True
+    return _native
 
 
 def lib() -> ctypes.CDLL:
@@ -73,11 +91,16 @@ def transform(value: str, mode: int) -> str:
         raise ValueError("mode must be 0 (complement), 1 (reverse), or 2 (reverse-complement)")
     # Keep value, dst, and mapping strongly referenced until the C call returns.
     src, size = _address_and_size(value)
-    dst = ctypes.create_string_buffer(size)
-    if size:
-        mapping = _COMPLEMENT if mode != 1 else _IDENTITY
-        lib().mpf_transform(src, ctypes.addressof(dst), mapping.ctypes.data, size, mode)
-    return bytes(dst).decode()
+    if not size:
+        return ""
+    mapping = _COMPLEMENT if mode != 1 else _IDENTITY
+    native = _native_module()
+    if native is not None and value.isascii():
+        return native.transform(value, mode, int(mapping.ctypes.data))
+    buffer = bytearray(size)
+    dst_address = ctypes.addressof(ctypes.c_char.from_buffer(buffer))
+    lib().mpf_transform(src, dst_address, mapping.ctypes.data, size, mode)
+    return buffer.decode()
 
 
 def histogram(value: str | bytes) -> np.ndarray:
