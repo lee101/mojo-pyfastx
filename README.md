@@ -65,11 +65,14 @@ initial-index case deletes upstream's `.fxi` before every measured run.
 | reverse_complement (32M bases) | 9.7 ms | 24.5 ms | 2.52x | faster |
 | Fasta initial index + composition (5M bases) | 11.4 ms | 38.1 ms | 3.36x | faster |
 
-The transform kernel uses byte SIMD with a scalar tail and 16-way parallel work above
-16 MiB. The histogram has a SIMD fast path for uppercase DNA and a scalar fallback for
-arbitrary bytes. The compact FASTA parser avoids per-line objects and unnecessary
-single-record concatenation before composition. These transforms and histograms do far
-less than roughly two arithmetic operations per byte moved, so no GPU path is provided.
+The transform kernel uses byte SIMD with a scalar tail in a single pass. The
+16-way split above 16 MiB is gone: the kernel is a table lookup and a store per
+byte, well under two arithmetic operations per byte moved, so the split cost
+more than it saved. The histogram has a SIMD fast path for uppercase DNA and a
+scalar fallback for arbitrary bytes. The compact FASTA parser avoids per-line
+objects and unnecessary single-record concatenation before composition. These
+transforms and histograms move far less than roughly two arithmetic operations
+per byte, so no GPU path is provided.
 
 ## How it works
 

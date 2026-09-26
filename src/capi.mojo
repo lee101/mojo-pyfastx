@@ -1,13 +1,10 @@
 """Byte kernels used by the Python FASTA/FASTQ indexer."""
 
-from max.algorithm import parallelize
 from std.sys.info import simd_width_of as simdwidthof
 
 comptime BytePtr = Pointer[UInt8, AnyOrigin[mut=True]]
 comptime IntPtr = Pointer[Int64, AnyOrigin[mut=True]]
 comptime BYTE_W = simdwidthof[DType.uint8]()
-comptime PARALLEL_THRESHOLD = 16 * 1024 * 1024
-comptime TRANSFORM_WORKERS = 16
 
 
 def canonical_simd[W: Int](chars: SIMD[DType.uint8, W]) -> Bool:
@@ -115,17 +112,7 @@ def mpf_transform(src_addr: Int, dst_addr: Int, map_addr: Int, n: Int, mode: Int
     var dst = BytePtr(unsafe_from_address=dst_addr)
     var mapping = BytePtr(unsafe_from_address=map_addr)
 
-    @__parameter
-    @__copy_capture(src, dst, mapping, n, mode)
-    def work(worker: Int):
-        var start = worker * n // TRANSFORM_WORKERS
-        var end = (worker + 1) * n // TRANSFORM_WORKERS
-        transform_range(src, dst, mapping, n, mode, start, end)
-
-    if n >= PARALLEL_THRESHOLD:
-        parallelize[work](TRANSFORM_WORKERS, TRANSFORM_WORKERS)
-    else:
-        transform_range(src, dst, mapping, n, mode, 0, n)
+    transform_range(src, dst, mapping, n, mode, 0, n)
 
 
 @export("mpf_count_bytes")

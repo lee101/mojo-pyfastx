@@ -13,15 +13,15 @@ def test_reverse_complement_matches_upstream_iupac():
     assert mpf.reverse_complement(seq) == reference.reverse_complement(seq)
 
 
-def test_reverse_complement_simd_tail_and_parallel_paths_match_upstream():
+def test_reverse_complement_simd_tail_and_multi_megabase_inputs_match_upstream():
     simd_tail = ("ACGTURYSWKMBDHVNacgturyswkmbdhvnXYZ" * 3) + "A"
     assert mpf.reverse_complement(simd_tail) == reference.reverse_complement(simd_tail)
-    below_threshold = "ACGTN" * 3_355_443
-    above_threshold_tail = ("ACGTN" * 3_355_443) + "AC"
-    assert len(below_threshold) == 16 * 1024 * 1024 - 1
-    assert len(above_threshold_tail) == 16 * 1024 * 1024 + 1
-    assert mpf.reverse_complement(below_threshold) == reference.reverse_complement(below_threshold)
-    assert mpf.reverse_complement(above_threshold_tail) == reference.reverse_complement(above_threshold_tail)
+    whole_vector = "ACGTN" * 3_355_443
+    whole_vector_tail = ("ACGTN" * 3_355_443) + "AC"
+    assert len(whole_vector) == 16 * 1024 * 1024 - 1
+    assert len(whole_vector_tail) == 16 * 1024 * 1024 + 1
+    assert mpf.reverse_complement(whole_vector) == reference.reverse_complement(whole_vector)
+    assert mpf.reverse_complement(whole_vector_tail) == reference.reverse_complement(whole_vector_tail)
 
 
 def test_histogram_simd_fast_path_scalar_fallback_and_tail():
